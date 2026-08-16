@@ -1,0 +1,143 @@
+---
+title: "simulacao_tarefa7"
+author: "seminário mlg"
+date: "2026-04-19"
+output: html_document
+---
+
+
+```{r}
+set.seed(42)
+
+sim_mc <- function(Q, n, x0 = 1) {
+  x <- integer(n); x[1] <- x0
+  for (t in 2:n) x[t] <- sample(nrow(Q), 1, prob = Q[x[t-1],])
+  x
+}
+
+stationary <- function(Q) {
+  m <- nrow(Q); A <- t(Q) - diag(m); A[m,] <- 1; b <- c(rep(0,m-1),1); solve(A,b)
+}
+
+emp_dist <- function(x, k) {
+  m <- max(x)
+  mat  <- embed(x, k)[, k:1, drop=FALSE]
+  keys <- apply(mat, 1, paste, collapse="-")
+  tab  <- table(keys)
+  grid <- do.call(expand.grid, rep(list(1:m), k))
+  all_keys <- apply(grid, 1, paste, collapse="-")
+  counts <- as.numeric(tab[all_keys]); counts[is.na(counts)] <- 0
+  array(counts/sum(counts), dim=rep(m,k))
+}
+
+entropy_rate_plugin <- function(x, k) {
+  m <- max(x); Pkp1 <- emp_dist(x,k+1); Pk <- emp_dist(x,k); h <- 0
+  for (i in which(Pkp1 > 0)) {
+    ai <- arrayInd(i, rep(m,k+1))
+    pj <- Pkp1[i]; pd <- Pk[ai[1,1:k,drop=FALSE]]
+    if (pd > 0) h <- h - pj * log2(pj/pd)
+  }
+  h
+}
+
+mi_rate_plugin <- function(x, k) {
+  m <- max(x); Pkp1 <- emp_dist(x,k+1); Pk <- emp_dist(x,k)
+  Px0 <- apply(Pkp1, k+1, sum); I <- 0
+  for (i in which(Pkp1 > 0)) {
+    ai <- arrayInd(i, rep(m,k+1))
+    pj <- Pkp1[i]; px0 <- Px0[ai[1,k+1]]; pp <- Pk[ai[1,1:k,drop=FALSE]]
+    if (px0 > 0 && pp > 0) I <- I + pj * log2(pj/(px0*pp))
+  }
+  I
+}
+
+true_h <- function(Q) {
+  pi <- stationary(Q); m <- nrow(Q); h <- 0
+  for (a in 1:m) for (a2 in 1:m)
+    if (Q[a,a2]>0) h <- h - pi[a]*Q[a,a2]*log2(Q[a,a2])
+  h
+}
+
+true_I <- function(Q) {
+  pi <- stationary(Q); H_marg <- -sum(pi[pi>0]*log2(pi[pi>0]))
+  H_marg - true_h(Q)
+}
+
+Q <- matrix(c(0.8,0.2,0.4,0.6), nrow=2, byrow=TRUE)
+h_teo <- true_h(Q); I_teo <- true_I(Q)
+cat(sprintf("Taxa de entropia teórica:     %.6f bits\n", h_teo))
+cat(sprintf("Taxa de inf. mútua teórica:   %.6f bits\n\n", I_teo))
+
+ns    <- c(100, 500, 1000, 5000, 10000, 50000)
+n_rep <- 30
+h_mat <- I1_mat <- I2_mat <- matrix(NA, n_rep, length(ns))
+
+cat("Simulando...\n")
+for (j in seq_along(ns)) {
+  for (r in 1:n_rep) {
+    x <- sim_mc(Q, ns[j])
+    h_mat[r,j]  <- entropy_rate_plugin(x, 1)
+    I1_mat[r,j] <- mi_rate_plugin(x, 1)
+    I2_mat[r,j] <- mi_rate_plugin(x, 2)
+  }
+  cat(sprintf("  n = %6d ok\n", ns[j]))
+}
+
+h_med  <- colMeans(h_mat);  h_sd  <- apply(h_mat,  2, sd)
+I1_med <- colMeans(I1_mat); I1_sd <- apply(I1_mat, 2, sd)
+I2_med <- colMeans(I2_mat); I2_sd <- apply(I2_mat, 2, sd)
+
+cat("\nTabela – Taxa de Entropia (k=1)\n")
+cat(sprintf("%-8s  %-9s  %-9s  %-9s\n","n","Média","DP","|Erro|"))
+for (j in seq_along(ns))
+  cat(sprintf("%-8d  %-9.5f  %-9.5f  %-9.5f\n",
+              ns[j],h_med[j],h_sd[j],abs(h_med[j]-h_teo)))
+
+cat("\nTabela – Taxa de Inf. Mútua\n")
+cat(sprintf("%-8s  %-9s  %-9s  %-9s  %-9s\n","n","Méd k=1","DP k=1","Méd k=2","DP k=2"))
+for (j in seq_along(ns))
+  cat(sprintf("%-8d  %-9.5f  %-9.5f  %-9.5f  %-9.5f\n",
+              ns[j],I1_med[j],I1_sd[j],I2_med[j],I2_sd[j]))
+
+pdf("/mnt/user-data/outputs/estimadores_convergencia.pdf", width=11, height=5)
+par(mfrow=c(1,2), mar=c(4.5,5,4,1.5), family="serif")
+
+col1 <- "#2166AC"; col2 <- "#4DAC26"; col_t <- "#D73027"
+alp  <- function(c) adjustcolor(c, alpha.f=0.18)
+
+# Plot 1 – Entropia
+ylim1 <- range(c(h_med+2*h_sd, h_med-2*h_sd, h_teo*c(0.88,1.06)))
+plot(ns, h_med, type="b", pch=19, lwd=2, col=col1, log="x",
+     xlab="Tamanho amostral (n)",
+     ylab=expression(hat(h)[n]^{(1)}*(X)~"[bits]"),
+     main="Convergência: taxa de entropia\n(cadeia de Markov, k = 1)",
+     ylim=ylim1, font.main=1, cex.main=1.05, xaxt="n")
+axis(1, at=ns, labels=format(ns,big.mark=".",scientific=FALSE), cex.axis=0.75)
+polygon(c(ns,rev(ns)), c(h_med+h_sd,rev(h_med-h_sd)), col=alp(col1), border=NA)
+abline(h=h_teo, lty=2, col=col_t, lwd=2)
+legend("topright", bty="n", cex=0.85,
+       legend=c("Média","± 1 DP","Valor teórico"),
+       col=c(col1,alp(col1),col_t), lty=c(1,NA,2), lwd=c(2,NA,2),
+       pch=c(19,15,NA), pt.cex=c(1,1.8,NA))
+
+# Plot 2 – Inf. Mútua
+ylim2 <- range(c(I1_med+2*I1_sd, I1_med-2*I1_sd,
+                 I2_med+2*I2_sd, I2_med-2*I2_sd, 0, I_teo*1.6))
+plot(ns, I1_med, type="b", pch=19, lwd=2, col=col1, log="x",
+     xlab="Tamanho amostral (n)",
+     ylab=expression(hat(I)[n]*(X[0]*";"*X[-1])~"[bits]"),
+     main=expression("Convergência: taxa de inf. mútua"),
+     ylim=ylim2, font.main=1, cex.main=1.05, xaxt="n")
+axis(1, at=ns, labels=format(ns,big.mark=".",scientific=FALSE), cex.axis=0.75)
+polygon(c(ns,rev(ns)), c(I1_med+I1_sd,rev(I1_med-I1_sd)), col=alp(col1), border=NA)
+lines(ns, I2_med, type="b", pch=17, lwd=2, col=col2)
+polygon(c(ns,rev(ns)), c(I2_med+I2_sd,rev(I2_med-I2_sd)), col=alp(col2), border=NA)
+abline(h=I_teo, lty=2, col=col_t, lwd=2)
+legend("topright", bty="n", cex=0.85,
+       legend=c("k = 1","k = 2","± 1 DP","Valor teórico"),
+       col=c(col1,col2,"gray60",col_t), lty=c(1,1,NA,2), lwd=c(2,2,NA,2),
+       pch=c(19,17,15,NA), pt.cex=c(1,1,1.8,NA))
+dev.off()
+cat("\nPDF salvo.\n")
+```
+

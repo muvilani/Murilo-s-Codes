@@ -1,0 +1,136 @@
+---
+title: "simulacoes-tcc"
+author: "Murilo Cassiavilani"
+date: "2026-04-26"
+output: html_document
+---
+
+```{r}
+# Matriz de transição do processo de ordem 2 "achatado"
+# Estados: 1=(0,0), 2=(0,1), 3=(1,0), 4=(1,1)
+Q2 <- matrix(c(
+  3/4, 1/4,   0,   0,
+    0,   0, 3/4, 1/4,
+  3/4, 1/4,   0,   0,
+    0,   0, 1/4, 3/4
+), nrow = 4, byrow = TRUE)
+
+# Distribuição estacionária: autovetor esquerdo associado ao autovalor 1
+vals_vecs <- eigen(t(Q2))
+idx       <- which.min(abs(vals_vecs$values - 1))
+pi4       <- Re(vals_vecs$vectors[, idx])
+pi4       <- pi4 / sum(pi4)
+
+names(pi4) <- c("(0,0)", "(0,1)", "(1,0)", "(1,1)")
+print(round(pi4, 4))
+# (0,0)=0.5, (0,1)=0.1667, (1,0)=0.1667, (1,1)=0.1667
+```
+O processo original {X_t} é de ordem 2, ou seja, o próximo valor depende dos dois últimos. 
+Para torná-lo uma cadeia de Markov de ordem 1 (que é mais fácil de trabalhar), criamos estados compostos: 
+cada estado é o par (X_{t-1}, X_t). Os quatro estados possíveis são (0,0), (0,1), (1,0) e (1,1).
+A lógica das transições vem do processo original: dado o par (a, b), o próximo bit é 0 com prob. 3/4 e 1 com prob. 1/4, produzindo o novo par (b, 0) ou (b, 1). 
+Por isso, por exemplo, do estado (0,1) só se pode ir para (1,0) com prob. 3/4 ou (1,1) com prob. 1/4 — nunca para (0,0) ou (0,1).
+
+A distribuição estacionária π é aquela que não muda quando você aplica a matriz de transição: π Q = π. 
+Matematicamente, isso é equivalente a ser um autovetor esquerdo de Q com autovalor 1. 
+O eigen(t(Q2)) faz isso: transpõe a matriz (para pegar o autovetor esquerdo como coluna) e extrai os autovetores. 
+Depois normalizamos dividindo pela soma para que π seja uma distribuição de probabilidade válida. 
+O resultado (0.5, 0.167, 0.167, 0.167) diz que, no longo prazo, metade do tempo o processo está no estado (0,0).
+
+```{r}
+set.seed(42)
+N_burnin <- 5000
+N_sample <- 50000
+
+# Função auxiliar: próximo estado dado o atual
+proximo_estado <- function(s, Q) {
+  sample(1:nrow(Q), size = 1, prob = Q[s, ])
+}
+
+# Burn-in
+s <- 1L
+for (i in seq_len(N_burnin)) s <- proximo_estado(s, Q2)
+
+# Geração da amostra (sequência de estados compostos)
+estados <- integer(N_sample)
+estados[1] <- s
+for (i in 2:N_sample) {
+  estados[i] <- proximo_estado(estados[i - 1], Q2)
+}
+
+# Converte estado composto -> bit X_t (segundo elemento do par)
+# estado 1=(0,0)->0, 2=(0,1)->1, 3=(1,0)->0, 4=(1,1)->1
+X <- ifelse(estados %in% c(2, 4), 1L, 0L)
+cat("Proporção de 1s:", mean(X), " (verdadeiro: ", 1/3, ")\n")
+```
+O burn-in de 5000 passos serve para esquecer o estado inicial (começamos no estado 1) e deixar a cadeia "esquentar" até estar próxima da distribuição estacionária. Depois disso, coletamos 50000 observações que podem ser consideradas amostras da distribuição de longo prazo.
+
+O bit X_t é o segundo elemento do par. Estados 2 = (0,1) e 4 = (1,1) têm segundo elemento 1; os demais têm 0. A proporção de 1s saiu 0.3355, próximo do valor verdadeiro 1/3 — isso é a lei dos grandes números confirmando a distribuição estacionária marginal.
+
+```{r}
+n <- length(X)
+
+# Marginal P_hat(X_0 = a)
+P1_hat <- table(X) / n
+print(round(P1_hat, 4))
+
+# Bivariada P_hat(X_{t-1}=a, X_t=a')
+P2_hat <- table(X[-n], X[-1]) / (n - 1)
+print(round(P2_hat, 4))
+
+# Trivariada - forma correta
+a_vec <- X[1:(n-2)]      # X_{t-2}
+b_vec <- X[2:(n-1)]      # X_{t-1}  
+c_vec <- X[3:n]          # X_t
+
+# Verifica comprimentos (devem ser iguais)
+cat(length(a_vec), length(b_vec), length(c_vec), "\n")
+
+P3_hat <- table(a_vec, b_vec, c_vec) / (n - 2)
+print(round(P3_hat, 4))
+# Forma mais clara:
+a_vec <- X[1:(n-2)]
+b_vec <- X[2:(n-1)]
+c_vec <- X[3:n]
+P3_hat <- table(a_vec, b_vec, c_vec) / (n - 2)
+print(round(P3_hat, 4))
+```
+
+P1_hat conta quantas vezes saiu 0 e quantas vezes saiu 1. P2_hat conta todas as transições consecutivas (X_t, X_{t+1}) — são tabelas de contingência divididas pelo número de pares. Esses são os estimadores de máxima verossimilhança das distribuições conjuntas.
+Para a trivariada, o mesmo raciocínio: deslocamos o vetor X três vezes para alinhar X_{t-2}, X_{t-1} e X_t em colunas paralelas, e contamos as triplas.
+
+```{r}
+entropia <- function(p) {
+  p <- as.numeric(p)
+  p <- p[p > 0]          # remove zeros (convenção 0 log 0 = 0)
+  -sum(p * log2(p))
+}
+
+H3 <- entropia(P3_hat)
+H2 <- entropia(P2_hat)
+h_hat <- H3 - H2
+
+cat("H_hat(trivariada) =", round(H3, 4), "bits\n")
+cat("H_hat(bivariada)  =", round(H2, 4), "bits\n")
+cat("h_hat(X)          =", round(h_hat, 4), "bits\n")
+cat("h_true            =", round(-3/4*log2(3/4) - 1/4*log2(1/4), 4), "bits\n")
+```
+
+A entropia de Shannon H(X) mede a incerteza média de uma distribuição. 
+Para um processo de Markov, isso converge rápido e pode ser estimado como H(trivariada) - H(bivariada), que é a entropia condicional H(X_t | X_{t-1}, X_{t-2}). O resultado 0.8158 bits está muito próximo do valor teórico 0.8113 bits, que vem diretamente de -3/4 · log₂(3/4) - 1/4 · log₂(1/4) — exatamente a incerteza de uma variável Bernoulli(1/4), que é a distribuição do próximo bit dado o passado.
+
+```{r}
+# Marginais a partir da bivariada
+P_Xm1 <- rowSums(P2_hat)   # P_hat(X_{t-1})
+P_X0  <- colSums(P2_hat)   # P_hat(X_t)
+
+H_X0_hat <- entropia(P_X0)
+I_rate_hat <- H_X0_hat - h_hat
+
+cat("H_hat(X0)              =", round(H_X0_hat, 4), "bits\n")
+cat("I_hat(X) = H_hat - h_hat =", round(I_rate_hat, 4), "bits\n")
+cat("I_true   =", round(-2/3*log2(2/3) - 1/3*log2(1/3) -
+                        (-3/4*log2(3/4) - 1/4*log2(1/4)), 4), "bits\n")
+```
+H(X_0) é a entropia marginal de um único bit (≈ 0.9205 bits, levemente abaixo de 1 bit porque o processo não é equiprovável). 
+A diferença H(X_0) - h(X) mede o quanto de redundância existe no processo — o quanto um bit é previsível dado o passado. O resultado 0.1047 bits (teórico: 0.107) confirma que o processo tem memória: os bits consecutivos não são independentes.
