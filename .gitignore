@@ -1,0 +1,13 @@
+.Rhistory
+.RData
+.Rproj.user/
+.Renviron
+.env
+*.rds
+*.RDS
+cache_Rcpp/
+resultados*/
+saida_agregada*/
+levantamento_regioes/
+validacao_profunda*/
+Rplots.pdf

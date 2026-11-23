@@ -8,7 +8,7 @@ library(neuprintr)
 conn <- neuprint_login(
   server  = "https://neuprint.janelia.org/",
   dataset = "male-cns:v1.0",
-  token   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im11dmlsYW5pMkBnbWFpbC5jb20iLCJsZXZlbCI6Im5vYXV0aCIsImltYWdlLXVybCI6Imh0dHBzOi8vbGgzLmdvb2dsZXVzZXJjb250ZW50LmNvbS9hL0FDZzhvY0lvVUxYb0trVTh5Ti1lX19EbkVMcjdjanRQc1JlQzhqSDU4VWllR1h0WnJER0p4OEZ6PXM5Ni1jP3N6PTUwP3N6PTUwIiwiZXhwIjoxOTYxOTc1OTI0fQ.F4lexdbe2VkyBSHen-44KgKtnnV2rlY0ZFy5G1DJuA4"
+  token   = Sys.getenv("NEUPRINT_TOKEN")
 )
 
 
